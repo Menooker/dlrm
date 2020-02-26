@@ -13,9 +13,9 @@ fi
 #echo $dlrm_extra_option
 
 cpu=1
-gpu=1
+gpu=0
 pt=1
-c2=1
+c2=0
 
 ncores=28 #12 #6
 nsockets="0"
@@ -32,17 +32,18 @@ rand_seed=727
 
 c2_net="async_scheduling"
 
-#Model param
+#Model param for mlperf workload
 mb_size=2048 #1024 #512 #256
-nbatches=1000 #500 #100
-bot_mlp="512-512-64"
-top_mlp="1024-1024-1024-1"
-emb_size=64
-nindices=100
-emb="1000000-1000000-1000000-1000000-1000000-1000000-1000000-1000000"
+nbatches=100 # 1000 500 100
+bot_mlp="13-512-256-128"
+top_mlp="512-512-256-1"
+emb_size=128
+nindices=1
+emb="227605432-39060-17295-7424-20265-3-7122-1543-63-130229467-3067956-405282-10-2209-11938-155-4-976-14-292775614-40790948-87188510-590152-12973-108-36"
 interaction="dot"
 tnworkers=0
 tmb_size=16384
+max_ind_range=40000000
 
 #_args="--mini-batch-size="${mb_size}\
 _args=" --num-batches="${nbatches}\
@@ -55,6 +56,7 @@ _args=" --num-batches="${nbatches}\
 " --arch-interaction-op="${interaction}\
 " --numpy-rand-seed="${rand_seed}\
 " --print-freq="${print_freq}\
+" --max-ind-range="${max_ind_range}\
 " --print-time"\
 " --enable-profiling "
 

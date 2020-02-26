@@ -88,6 +88,10 @@ import sklearn.metrics
 exc = getattr(builtins, "IOError", "FileNotFoundError")
 
 
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
+
 ### define dlrm in PyTorch ###
 class DLRM_Net(nn.Module):
     def create_mlp(self, ln, sigmoid_layer):
@@ -186,6 +190,8 @@ class DLRM_Net(nn.Module):
         qr_threshold=200,
         md_flag=False,
         md_threshold=200,
+        emb_backward_sgd_fusion=False,
+        emb_grad_dict={},
     ):
         super(DLRM_Net, self).__init__()
 
@@ -221,6 +227,7 @@ class DLRM_Net(nn.Module):
                 self.emb_l = self.create_emb(m_spa, ln_emb)
             self.bot_l = self.create_mlp(ln_bot, sigmoid_bot)
             self.top_l = self.create_mlp(ln_top, sigmoid_top)
+            self.emb_backward_sgd_fusion = emb_backward_sgd_fusion
 
     def apply_mlp(self, x, layers):
         # approach 1: use ModuleList
@@ -239,6 +246,7 @@ class DLRM_Net(nn.Module):
         # 3. for a list of embedding tables there is a list of batched lookups
 
         ly = []
+        self.emb_grad_dict = {}
         for k, sparse_index_group_batch in enumerate(lS_i):
             sparse_offset_group_batch = lS_o[k]
 
@@ -248,7 +256,10 @@ class DLRM_Net(nn.Module):
             # happening vertically across 0 axis, resulting in a row vector
             E = emb_l[k]
             V = E(sparse_index_group_batch, sparse_offset_group_batch)
-
+            if self.emb_backward_sgd_fusion:
+                V = V.detach()
+                V.requires_grad = True
+                self.emb_grad_dict[E] = V
             ly.append(V)
 
         # print(ly)
@@ -505,6 +516,7 @@ if __name__ == "__main__":
     # mlperf logging (disables other output and stops early)
     parser.add_argument("--mlperf-logging", action="store_true", default=False)
     parser.add_argument("--mlperf-threshold", type=float, default=0.0)  # 0.789 # 0.8107
+    parser.add_argument("--emb-backward-sgd-fusion", action="store_true", default=False)
     args = parser.parse_args()
 
     if args.mlperf_logging:
@@ -557,6 +569,12 @@ if __name__ == "__main__":
     else:
         # input and target at random
         ln_emb = np.fromstring(args.arch_embedding_size, dtype=int, sep="-")
+        # enforce maximum limit on number of vectors per embedding
+        if args.max_ind_range > 0:
+            ln_emb = np.array(list(map(
+                lambda x: x if x < args.max_ind_range else args.max_ind_range,
+                ln_emb
+            )))
         m_den = ln_bot[0]
         train_data, train_ld = dp.make_random_data_and_loader(args, ln_emb, m_den)
         nbatches = args.num_batches if args.num_batches > 0 else len(train_ld)
@@ -709,6 +727,7 @@ if __name__ == "__main__":
         qr_threshold=args.qr_threshold,
         md_flag=args.md_flag,
         md_threshold=args.md_threshold,
+        emb_backward_sgd_fusion=args.emb_backward_sgd_fusion,
     )
     # test prints
     if args.debug_mode:
@@ -872,6 +891,15 @@ if __name__ == "__main__":
                     optimizer.zero_grad()
                     # backward pass
                     E.backward()
+                    # run emb backward and sgd update
+                    if dlrm.emb_backward_sgd_fusion:
+                        for k, sparse_index_group_batch in enumerate(lS_i):
+                            sparse_offset_group_batch = lS_o[k]
+                            EE = dlrm.emb_l[k]
+                            V = dlrm.emb_grad_dict[EE]
+                            nn.functional.embedding_bag_backward_sgd(
+                                EE.weight.data, get_lr(optimizer), V.grad, sparse_index_group_batch,
+                                sparse_offset_group_batch, mode="sum")
                     # debug prints (check gradient norm)
                     # for l in mlp.layers:
                     #     if hasattr(l, 'weight'):
