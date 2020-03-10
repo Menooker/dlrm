@@ -66,7 +66,7 @@ import dlrm_data_pytorch as dp
 import numpy as np
 
 # onnx
-import onnx
+#import onnx
 
 # pytorch
 import torch
@@ -190,7 +190,7 @@ class DLRM_Net(nn.Module):
         qr_threshold=200,
         md_flag=False,
         md_threshold=200,
-        emb_backward_sgd_fusion=False,
+        emb_backward_sgd_fusion=None,
         emb_grad_dict={},
     ):
         super(DLRM_Net, self).__init__()
@@ -516,7 +516,7 @@ if __name__ == "__main__":
     # mlperf logging (disables other output and stops early)
     parser.add_argument("--mlperf-logging", action="store_true", default=False)
     parser.add_argument("--mlperf-threshold", type=float, default=0.0)  # 0.789 # 0.8107
-    parser.add_argument("--emb-backward-sgd-fusion", action="store_true", default=False)
+    parser.add_argument("--emb-backward-sgd-fusion", type=int, default=None)
     args = parser.parse_args()
 
     if args.mlperf_logging:
@@ -835,6 +835,8 @@ if __name__ == "__main__":
             )
         )
 
+    thefunc = [None, nn.functional.embedding_bag_backward_sgd, nn.functional.embedding_bag_backward_sgd2, nn.functional.embedding_bag_backward_sgd3]
+
     print("time/loss/accuracy (if enabled):")
     with torch.autograd.profiler.profile(args.enable_profiling, use_gpu) as prof:
         while k < args.nepochs:
@@ -897,7 +899,9 @@ if __name__ == "__main__":
                             sparse_offset_group_batch = lS_o[k]
                             EE = dlrm.emb_l[k]
                             V = dlrm.emb_grad_dict[EE]
-                            nn.functional.embedding_bag_backward_sgd(
+                            
+                            func = thefunc[dlrm.emb_backward_sgd_fusion]
+                            func(
                                 EE.weight.data, get_lr(optimizer), V.grad, sparse_index_group_batch,
                                 sparse_offset_group_batch, mode="sum")
                     # debug prints (check gradient norm)
@@ -1140,7 +1144,7 @@ if __name__ == "__main__":
         for param in dlrm.parameters():
             print(param.detach().cpu().numpy())
 
-    # export the model in onnx
+    '''# export the model in onnx
     if args.save_onnx:
         with open("dlrm_s_pytorch.onnx", "w+b") as dlrm_pytorch_onnx_file:
             (X, lS_o, lS_i, _) = train_data[0]  # get first batch of elements
@@ -1150,4 +1154,4 @@ if __name__ == "__main__":
         # recover the model back
         dlrm_pytorch_onnx = onnx.load("dlrm_s_pytorch.onnx")
         # check the onnx model
-        onnx.checker.check_model(dlrm_pytorch_onnx)
+        onnx.checker.check_model(dlrm_pytorch_onnx)'''
